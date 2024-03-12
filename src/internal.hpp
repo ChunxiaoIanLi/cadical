@@ -1,6 +1,8 @@
 #ifndef _internal_hpp_INCLUDED
 #define _internal_hpp_INCLUDED
 
+#define ENABLE_RESETS true
+
 /*------------------------------------------------------------------------*/
 
 // Wrapped build specific headers which should go first.
@@ -99,6 +101,7 @@ extern "C" {
 #include "version.hpp"
 #include "vivify.hpp"
 #include "watch.hpp"
+#include "thompson.hpp"
 
 /*------------------------------------------------------------------------*/
 
@@ -122,6 +125,25 @@ struct CubesWithStatus {
 
 struct Internal {
 
+
+  enum class RLScoreType {
+    LBD = 0, // Literal Block Distance
+    GLR = 1, // Global Learning Rate
+    PPD = 2, // Propagations per Decision
+  };
+
+  enum class BCPMode {
+    IMMEDIATE  = 0,
+    DELAYED    = 1,
+    NUM_MODES  = 2,
+    OUTOFORDER = 3,
+  };
+
+  enum class RestartMode {
+    RESTART   = 0,
+    RESET     = 1,
+    NUM_MODES = 2,
+  };
   /*----------------------------------------------------------------------*/
 
   // The actual internal state of the solver is set and maintained in this
@@ -157,6 +179,17 @@ struct Internal {
   void require_mode (Mode m) const { assert (mode & m), (void) m; }
 
   /*----------------------------------------------------------------------*/
+
+  int64_t rl_lbdsum;
+  int64_t rl_prevConflicts;
+  int64_t rl_prevDecisions;
+  int64_t rl_prevPropagations;
+  Random rl_random;
+
+  RestartMode restartmode;        // Restart/reset mode
+  Thompson_var resetrl_thompson;  // Activity reset RL struct
+  double resetrl_historicalScore;
+
 
   int mode;                    // current internal state
   bool unsat;                  // empty clause found or learned
@@ -606,6 +639,14 @@ struct Internal {
   bool propagate ();
 
   void propergate (); // Repropagate without blocking literals.
+
+  void clear_scores_rl ();
+  template <RLScoreType scoretype> double get_prev_round_score_rl ();
+
+  // Reset restarts
+  void reset_scores ();
+  RestartMode update_restart_mode_rl ();
+
 
   // Undo and restart in 'backtrack.cpp'.
   //

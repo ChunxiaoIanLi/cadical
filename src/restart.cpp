@@ -117,14 +117,82 @@ int Internal::reuse_trail () {
   return res;
 }
 
+// Solver configuration
+static constexpr Internal::RLScoreType RESET_SCORETYPE     = Internal::RLScoreType::GLR;
+
+void Internal::clear_scores_rl () {
+  rl_prevConflicts    = stats.learned.clauses;
+  rl_prevPropagations = stats.propagations.search;
+  rl_prevDecisions    = stats.decisions;
+  rl_lbdsum           = 0;
+}
+
+template <Internal::RLScoreType scoretype>
+inline double Internal::get_prev_round_score_rl () {
+  switch (scoretype) {
+    //case RLScoreType::LBD: return rl_lbdsum / static_cast<double>(stats.learned.clauses - rl_prevConflicts);
+    case RLScoreType::GLR: return (stats.learned.clauses - rl_prevConflicts) / static_cast<double>(stats.decisions - rl_prevDecisions);
+    case RLScoreType::PPD: return (stats.propagations.search - rl_prevPropagations) / static_cast<double>(stats.decisions - rl_prevDecisions);
+    default: __builtin_unreachable ();
+  }
+}
+
+inline Internal::RestartMode Internal::update_restart_mode_rl () {
+  if (stats.restarts > 1) {
+    // Update (bump and decay) reward values
+    const double prevRoundScore = get_prev_round_score_rl<RESET_SCORETYPE> ();
+    resetrl_thompson.update_dist(static_cast<size_t>(restartmode), prevRoundScore >= resetrl_historicalScore, 1e-3 * opts.resetrlbetadecay);
+
+    // Update historical score as a weighted average
+    const double DECAY_FACTOR = 1e-3 * opts.resetrlscoredecay;
+    resetrl_historicalScore = resetrl_historicalScore * DECAY_FACTOR + prevRoundScore * (1 - DECAY_FACTOR);
+    clear_scores_rl();
+  }
+
+  // Pick whether to perform a reset
+  restartmode = static_cast<RestartMode>(resetrl_thompson.select_lever ());
+  if (restartmode == RestartMode::RESET) stats.resets++;
+  return restartmode;
+}
+
+inline void Internal::reset_scores () {
+  constexpr double SCALE_FACTOR = 1e-3;
+  assert (!level);
+
+  scores.clear();
+  for (int idx = max_var; idx; idx--) {
+    stab[idx] = rl_random.generate_double() * SCALE_FACTOR;
+    scores.push_back(idx);
+  }
+}
+
+
+
 void Internal::restart () {
   START (restart);
   stats.restarts++;
   stats.restartlevels += level;
   if (stable)
     stats.restartstable++;
-  LOG ("restart %" PRId64 "", stats.restarts);
-  backtrack (reuse_trail ());
+
+  // Check if we should reset
+  if (ENABLE_RESETS && update_restart_mode_rl () == RestartMode::RESET) {
+    printf("rl_prevConflicts: %d\n", rl_prevConflicts);
+    printf("rl_prevDecisions: %d\n", rl_prevDecisions);
+    
+    const int trivial_decisions = assumptions.size ()
+      // Plus 1 if the constraint is satisfied via implications of assumptions
+      // and a pseudo-decision level was introduced
+      + !control[assumptions.size () + 1].decision;
+    backtrack (trivial_decisions);
+    reset_scores ();
+    stats.resets++;
+  } else {
+    LOG ("restart %" PRId64 "", stats.restarts);
+    backtrack (reuse_trail ());
+  }
+
+  
 
   lim.restart = stats.conflicts + opts.restartint;
   LOG ("new restart limit at %" PRId64 " conflicts", lim.restart);

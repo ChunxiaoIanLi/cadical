@@ -6,7 +6,20 @@ namespace CaDiCaL {
 static Clause external_reason_clause;
 
 Internal::Internal ()
-    : mode (SEARCH), unsat (false), iterating (false),
+    : // Reinforcement learning
+      rl_lbdsum (0),
+      rl_prevConflicts (0),
+      rl_prevDecisions (0),
+      rl_prevPropagations (0),
+      rl_random (42),
+
+      // Reinforcement learning for activity resets
+      restartmode (RestartMode::RESTART),
+      resetrl_thompson (static_cast<size_t>(RestartMode::NUM_MODES)),
+      resetrl_historicalScore (0),
+
+
+      mode (SEARCH), unsat (false), iterating (false),
       localsearching (false), lookingahead (false), preprocessing (false),
       protected_reasons (false), force_saved_phase (false),
       searching_lucky_phases (false), stable (false), reported (false),
@@ -878,6 +891,7 @@ void Internal::finalize (int res) {
 void Internal::print_statistics () {
   stats.print (this);
   for (auto &st : stat_tracers)
+    printf("asdfsfdas\n");
     st->print_stats ();
 }
 
